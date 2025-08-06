@@ -1,0 +1,4 @@
+telebot==0.0.5
+pyrogram==2.0.106
+telethon==1.34.0
+pyCryptoPayAPI==1.0.0
