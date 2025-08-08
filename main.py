@@ -1253,6 +1253,16 @@ def pricenextstep(m):
     mrk.add(types.InlineKeyboardButton(text='Автоматический', callback_data=f'Автоматический{num}'), types.InlineKeyboardButton(text='Ручной', callback_data=f'Ручной{num}'))
     x = bot.send_message(chat_id=m.from_user.id, text='Отлично, теперь выберите тип выдачи', reply_markup=mrk)
 
+
+def run_auth():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(bot.tg_auth.start_auth(num, call.from_user.id))
+    loop.close()
+
+Thread(target=run_auth, daemon=True).start()
+
+
     
 @bot.callback_query_handler(func=lambda call: call.data.startswith('Автоматический'))
 def auto(call: types.CallbackQuery):
@@ -1260,11 +1270,12 @@ def auto(call: types.CallbackQuery):
     
     # Инициализация tg_auth при первом вызове
     if not hasattr(bot, 'tg_auth'):
-        bot.tg_auth = TelegramAuth()
+        bot.tg_auth = TelegramAuth(bot=bot)  # Передаем экземпляр бота
+        bot.user_states = {}  # Создаем словарь для хранения состояний
         print("Инициализирован новый экземпляр TelegramAuth")
     
     try:
-        # Сохраняем данные лота (ваш существующий код)
+        # Сохраняем данные лота
         with open('/data/lots.json', 'r+', encoding='utf8') as f:
             data = json.load(f)
             data[str(num)] = {
@@ -1279,12 +1290,14 @@ def auto(call: types.CallbackQuery):
             f.seek(0)
             json.dump(data, f, ensure_ascii=False, indent=4)
         
-        # Запускаем авторизацию
-        Thread(
-            target=bot.tg_auth.start_auth,
-            args=(num, call.from_user.id),
-            daemon=True
-        ).start()
+        # Запускаем авторизацию в отдельном потоке
+        def run_auth():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(bot.tg_auth.start_auth(num, call.from_user.id))
+            loop.close()
+        
+        Thread(target=run_auth, daemon=True).start()
         
         bot.send_message(call.from_user.id, "🚀 Запущен процесс авторизации...")
         
