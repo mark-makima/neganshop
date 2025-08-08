@@ -243,9 +243,42 @@ class TelegramAuth:
             # Можно добавить обработку ошибки, например, отправить сообщение пользователю
             bot.send_message(chat_id, f"❌ Ошибка при отправке кода: {str(e)}")
 
+    async def _confirm_code(self, chat_id, code):
+        """Асинхронный метод подтверждения кода"""
+        if chat_id not in user_states:
+            return False
+
+        data = user_states[chat_id]
+        client = self.clients.get(data['phone'])
+        
+        if not client:
+            return False
+
+        try:
+            await client.sign_in(
+                phone=data['phone'],
+                code=code,
+                phone_code_hash=data['code_hash']
+            )
+            await asyncio.sleep(2)
+            return await self._save_session_and_cleanup(client, data['phone'], chat_id)
+        except SessionPasswordNeededError:
+            user_states[chat_id]['waiting_password'] = True
+            user_states[chat_id]['waiting_code'] = False
+            bot.send_message(chat_id, "🔐 Требуется двухфакторная аутентификация. Введите пароль:")
+            return False
+        except Exception as e:
+            print(f"Ошибка авторизации: {e}")
+            return False
+
     def confirm_code(self, chat_id, code):
+        """Синхронная обёртка для _confirm_code"""
         asyncio.set_event_loop(self.loop)
-        return self.loop.run_until_complete(self.confirm_code(chat_id, code))
+        try:
+            return self.loop.run_until_complete(self._confirm_code(chat_id, code))
+        except Exception as e:
+            print(f"Ошибка в confirm_code: {e}")
+            return False
         
     def confirm_password(self, chat_id, password):
         asyncio.set_event_loop(self.loop)
@@ -1522,3 +1555,4 @@ def get(m: types.Message):
 
 
 bot.infinity_polling(logger_level=logging.INFO)
+
