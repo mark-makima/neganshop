@@ -245,11 +245,11 @@ class TelegramAuth:
 
     def confirm_code(self, chat_id, code):
         asyncio.set_event_loop(self.loop)
-        return self.loop.run_until_complete(self._confirm_code(chat_id, code))
+        return self.loop.run_until_complete(self.confirm_code(chat_id, code))
         
     def confirm_password(self, chat_id, password):
         asyncio.set_event_loop(self.loop)
-        return self.loop.run_until_complete(self._confirm_password(chat_id, password))
+        return self.loop.run_until_complete(self.confirm_password(chat_id, password))
 
     async def _save_session_and_cleanup(self, client, phone, chat_id):
         """Сохраняет сессию и выполняет очистку"""
@@ -1518,6 +1518,7 @@ def get(m: types.Message):
                     with open(file, 'r', encoding='utf8')as f:
                         bot.send_document(chat_id=m.from_user.id, document=f, caption=f'{file}')
             
+
 
 
 bot.infinity_polling(logger_level=logging.INFO)
