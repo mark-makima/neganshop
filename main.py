@@ -210,10 +210,10 @@ class TelegramAuth:
         try:
             client = await self._create_client(phone)
             await client.connect()
-            
+
             # Добавляем задержку перед запросом кода
             await asyncio.sleep(2)
-            
+
             code_request = await client.send_code_request(phone)
             user_states[chat_id] = {
                 'phone': phone,
@@ -234,7 +234,7 @@ class TelegramAuth:
 
         data = user_states[chat_id]
         client = self.clients.get(data['phone'])
-        
+
         if not client:
             return False
 
@@ -258,15 +258,15 @@ class TelegramAuth:
     async def _save_session_and_cleanup(self, client, phone, chat_id):
         """Сохраняет сессию и выполняет очистку"""
         try:
-            session_file = f"/data/sessions/{phone}.session"
-            
+            session_file = f"data/sessions/{phone}.session"
+
             # Получаем строку сессии
             session_string = client.session.save()
-            
+
             # Сохраняем в файл
             with open(session_file, 'w') as f:
                 f.write(session_string)
-                
+
             return True
         except Exception as e:
             print(f"Ошибка сохранения сессии: {e}")
@@ -1558,3 +1558,4 @@ def get(m: types.Message):
 
 
 bot.infinity_polling(logger_level=logging.INFO)
+
