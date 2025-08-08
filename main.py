@@ -1284,19 +1284,23 @@ def auto(call: types.CallbackQuery):
             f.seek(0)
             json.dump(data, f, ensure_ascii=False, indent=4)
         
-        # Передаем num и chat_id через аргументы
-        def run_auth(phone_num, chat_id):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(tg_auth.start_auth(phone_num, chat_id))
-            loop.close()
+        # Создаем замыкание с нужными переменными
+        def run_auth_wrapper(phone_num, chat_id):
+            def inner():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(tg_auth.start_auth(phone_num, chat_id))
+                finally:
+                    loop.close()
+            return inner
         
-        # Запускаем в отдельном потоке с передачей аргументов
-        Thread(
-            target=run_auth,
-            args=(num, call.from_user.id),
+        # Запускаем в отдельном потоке
+        auth_thread = Thread(
+            target=run_auth_wrapper(num, call.from_user.id),
             daemon=True
-        ).start()
+        )
+        auth_thread.start()
         
         bot.send_message(call.from_user.id, "🚀 Запущен процесс авторизации...")
         
