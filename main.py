@@ -1268,12 +1268,6 @@ Thread(target=run_auth, daemon=True).start()
 def auto(call: types.CallbackQuery):
     num = call.data.replace('Автоматический', '')
     
-    # Инициализация tg_auth при первом вызове
-    if not hasattr(bot, 'tg_auth'):
-        bot.tg_auth = TelegramAuth(bot=bot)  # Передаем экземпляр бота
-        bot.user_states = {}  # Создаем словарь для хранения состояний
-        print("Инициализирован новый экземпляр TelegramAuth")
-    
     try:
         # Сохраняем данные лота
         with open('/data/lots.json', 'r+', encoding='utf8') as f:
@@ -1294,7 +1288,7 @@ def auto(call: types.CallbackQuery):
         def run_auth():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(bot.tg_auth.start_auth(num, call.from_user.id))
+            loop.run_until_complete(tg_auth.start_auth(num, call.from_user.id))
             loop.close()
         
         Thread(target=run_auth, daemon=True).start()
