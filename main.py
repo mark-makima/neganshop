@@ -125,71 +125,15 @@ API_HASH = 'ee71cff9806c0c865b24ebdc9168fa68'  # Замените на ваш AP
 
     
 
-class JsonDataCleaner:
-    def __init__(self, file_path: str, data_to_remove: Dict[str, Any]):
-        """
-        :param file_path: Путь к JSON файлу
-        :param data_to_remove: Данные для удаления (ключи и значения)
-        """
-        self.file_path = file_path
-        self.data_to_remove = data_to_remove
-        self.timer = None
-
-    def start_cleanup_timer(self, delay_minutes: int = 5):
-        """Запускает таймер для очистки через указанное количество минут"""
-        delay_seconds = delay_minutes * 60
-        self.timer = threading.Timer(delay_seconds, self.cleanup_data)
-        self.timer.start()
-        print(f"Таймер очистки установлен на {delay_minutes} минут")
-
-    def cleanup_data(self):
-        """Удаляет указанные данные из JSON файла"""
-        try:
-            # Проверяем существование файла
-            if not os.path.exists(self.file_path):
-                print(f"Файл {self.file_path} не найден")
-                return
-
-            # Читаем данные из файла
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Удаляем указанные данные
-            original_size = len(json.dumps(data))
-            for key in self.data_to_remove:
-                if key in data:
-                    del data[key]
-
-            # Записываем обратно только если данные изменились
-            if len(json.dumps(data)) != original_size:
-                with open(self.file_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=4, ensure_ascii=False)
-                print("Данные успешно удалены")
-            else:
-                print("Данные для удаления не найдены")
-
-        except json.JSONDecodeError:
-            print("Ошибка: Файл не является валидным JSON")
-        except Exception as e:
-            print(f"Произошла ошибка: {str(e)}")
-        finally:
-            self.timer = None
-
-    def cancel_cleanup(self):
-        """Отменяет запланированную очистку"""
-        if self.timer:
-            self.timer.cancel()
-            print("Таймер очистки отменен")
-            self.timer = None
-
 class TelegramAuth:
-    def __init__(self, bot, user_states):
+    def __init__(self, bot):
         self.clients = {}
         self.bot = bot
-        self.user_states = user_states
+        self.user_states = {}
         os.makedirs("/data/sessions", exist_ok=True)
 
     async def _create_client(self, phone):
+        """Создает клиента Telethon для номера"""
         session = StringSession()
         client = TelegramClient(
             session,
@@ -205,7 +149,8 @@ class TelegramAuth:
         self.clients[phone] = client
         return client
 
-    async def _send_code(self, phone, chat_id):
+    async def start_auth(self, phone, chat_id):
+        """Запускает процесс авторизации"""
         try:
             client = await self._create_client(phone)
             await client.connect()
@@ -215,92 +160,101 @@ class TelegramAuth:
             self.user_states[chat_id] = {
                 'phone': phone,
                 'code_hash': code_request.phone_code_hash,
+                'client': client,
                 'waiting_code': True,
                 'waiting_password': False
             }
             await self.bot.send_message(chat_id, "🔑 Код подтверждения отправлен. Введите код из SMS:")
+            return True
         except Exception as e:
             await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             if phone in self.clients:
                 await self.clients[phone].disconnect()
                 del self.clients[phone]
+            return False
 
-    async def _confirm_code(self, chat_id, code):
+    async def confirm_code(self, chat_id, code):
+        """Подтверждает код авторизации"""
         if chat_id not in self.user_states:
+            await self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
             return False
 
         data = self.user_states[chat_id]
-        client = self.clients.get(data['phone'])
+        client = data.get('client')
         if not client:
+            await self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
             return False
 
         try:
+            clean_code = re.sub(r'\D', '', code)
+            if len(clean_code) != 5:
+                await self.bot.send_message(chat_id, "❌ Код должен содержать 5 цифр")
+                return False
+
             await client.sign_in(
                 phone=data['phone'],
-                code=code,
+                code=clean_code,
                 phone_code_hash=data['code_hash']
             )
-            return await self._save_session_and_cleanup(client, data['phone'], chat_id)
+            
+            # Сохраняем сессию
+            session_string = client.session.save()
+            with open(f"/data/sessions/{data['phone']}.session", "w") as f:
+                f.write(session_string)
+                
+            await client.disconnect()
+            del self.user_states[chat_id]
+            await self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
+            return True
+            
         except SessionPasswordNeededError:
             self.user_states[chat_id]['waiting_password'] = True
             self.user_states[chat_id]['waiting_code'] = False
             await self.bot.send_message(chat_id, "🔐 Требуется двухфакторная аутентификация. Введите пароль:")
             return False
         except Exception as e:
-            print(f"Ошибка авторизации: {e}")
+            await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             return False
 
-    async def _confirm_password(self, chat_id, password):
+    async def confirm_password(self, chat_id, password):
+        """Подтверждает пароль 2FA"""
         if chat_id not in self.user_states:
+            await self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
             return False
 
         data = self.user_states[chat_id]
-        client = self.clients.get(data['phone'])
+        client = data.get('client')
         if not client:
+            await self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
             return False
 
         try:
             await client.sign_in(password=password)
-            return await self._save_session_and_cleanup(client, data['phone'], chat_id)
-        except Exception as e:
-            print(f"Ошибка 2FA: {e}")
-            return False
-
-    async def _save_session_and_cleanup(self, client, phone, chat_id):
-        try:
-            clean_phone = re.sub(r'\D', '', phone)
-            session_file = f"/data/sessions/{clean_phone}.session"
             
+            # Сохраняем сессию
             session_string = client.session.save()
-            with open(session_file, 'w') as f:
+            with open(f"/data/sessions/{data['phone']}.session", "w") as f:
                 f.write(session_string)
                 
-            return True
-        except Exception as e:
-            print(f"Ошибка сохранения сессии: {e}")
-            return False
-        finally:
             await client.disconnect()
-            if phone in self.clients:
-                del self.clients[phone]
-            if chat_id in self.user_states:
-                del self.user_states[chat_id]
-
-    def start_auth(self, phone, chat_id):
-        asyncio.run(self._send_code(phone, chat_id))
-
-    def confirm_code(self, chat_id, code):
-        return asyncio.run(self._confirm_code(chat_id, code))
-
-    def confirm_password(self, chat_id, password):
-        return asyncio.run(self._confirm_password(chat_id, password))
+            del self.user_states[chat_id]
+            await self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
+            return True
+            
+        except Exception as e:
+            await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
+            return False
 
 async def wait_for_verification_code(phone_number, bot, timeout=300):
+    """Ожидает код подтверждения в течение 5 минут"""
     clean_phone = re.sub(r'\D', '', phone_number)
     session_path = f"/data/sessions/{clean_phone}.session"
     
     if not os.path.exists(session_path):
-        print(f"Файл сессии не найден: {session_path}")
+        await bot.send_message(
+            chat_id=chat_id, 
+            text="❌ Файл сессии не найден. Авторизуйтесь сначала."
+        )
         return None
 
     client = None
@@ -317,11 +271,9 @@ async def wait_for_verification_code(phone_number, bot, timeout=300):
         await client.connect()
         
         if not await client.is_user_authorized():
-            with open('/data/lots.json', 'r') as f:
-                data = json.load(f)
             await bot.send_message(
-                chat_id=data[phone_number]['buyer'], 
-                text='Сессия не авторизована\nобратитесь в поддержку'
+                chat_id=chat_id, 
+                text='❌ Сессия не авторизована. Начните процесс заново.'
             )
             return None
 
@@ -331,60 +283,41 @@ async def wait_for_verification_code(phone_number, bot, timeout=300):
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
             text = event.message.text
-            code = extract_verification_code(text, phone_number, bot)
-            if code:
-                verification_code[0] = code
+            match = re.search(r'\b\d{5}\b', text)  # Ищем 5 цифр
+            if match:
+                verification_code[0] = match.group()
                 code_received.set()
-
+                    
         try:
             await asyncio.wait_for(code_received.wait(), timeout=timeout)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🔑 Получен код: {verification_code[0]}"
+            )
             return verification_code[0]
         except asyncio.TimeoutError:
-            with open('/data/lots.json', 'r') as f:
-                data = json.load(f)
             await bot.send_message(
-                chat_id=data[phone_number]['buyer'], 
-                text='Время ожидания истекло, код не получен'
+                chat_id=chat_id, 
+                text='⌛ Время ожидания истекло, код не получен.'
             )
             return None
     finally:
         if client and client.is_connected():
             await client.disconnect()
 
-def extract_verification_code(text, phone_number, bot):
-    if not text:
-        return None
-    
-    patterns = [
-        r'\b\d{5}\b',
-        r'код[: ]*(\d{5})',
-        r'code[: ]*(\d{5})',
-        r'verify[: ]*(\d{5})',
-        r'подтверждени[:ея ]*(\d{5})'
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            code = match.group(1) if match.lastindex else match.group(0)
-            if code.isdigit() and len(code) == 5:
-                with open('/data/lots.json', 'r') as f:
-                    data = json.load(f)
-                asyncio.create_task(
-                    bot.send_message(
-                        chat_id=data[phone_number]['buyer'],
-                        text=f'Ваш код: `{code}`'
-                    )
-                )
-                return code
-    return None
+
+
+
+
+
 
 def get_last_code_sync(phone_number, bot):
     return asyncio.run(wait_for_verification_code(phone_number, bot))
 
-# Инициализация
+# Инициализация в основном коде
+tg_auth = TelegramAuth(bot)
 verify_code = {}
-tg_auth = TelegramAuth(bot, user_states)
+
 
 
 def paid(id, filename='paid.txt'):
@@ -927,97 +860,78 @@ def stepbuy(call: types.CallbackQuery):
         reply_markup=mrk,
         disable_web_page_preview=True
             )
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('покупка'))
-def buynum(call: types.CallbackQuery):
-    global numbertosend, tg_auth
-    numbertosend = ''
-    bot.answer_callback_query(call.id, f"покупка")
+async def buynum(call: types.CallbackQuery):
     number = call.data.replace('покупка', '')
-    numbertosend += number
     
     with open('/data/users.json', 'r', encoding='utf8') as f:
-        data = json.load(f)
-    with open('/data/lots.json', 'r', encoding='utf8') as x:
-        numbers = json.load(x)
-        
-    if data[str(call.from_user.id)]['balance'] >= float(numbers[number]['price']):
-        if numbers[number]['status'] == 'Активен':
-            deupdate_balance(user_id=str(call.from_user.id), amount_to_min=float(numbers[number]['price']))
+        users = json.load(f)
+    with open('/data/lots.json', 'r', encoding='utf8') as f:
+        lots = json.load(f)
+    
+    user_id = str(call.from_user.id)
+    
+    if users[user_id]['balance'] < float(lots[number]['price']):
+        await bot.send_message(chat_id=call.from_user.id,text="*❌ Недостаточно средств на балансе!*",parse_mode='Markdown')
+        return
+    if lots[number]['status'] != 'Активен':
+        await bot.send_message(chat_id=call.from_user.id,text="*❌ Лот уже продан!*",parse_mode='Markdown')
+        return
+    
+    # Обновляем баланс и статус лота
+    users[user_id]['balance'] -= float(lots[number]['price'])
+    lots[number]['status'] = "Куплен"
+    lots[number]['buyer'] = user_id
+    
+    with open('/data/users.json', 'w', encoding='utf8') as f:
+        json.dump(users, f, ensure_ascii=False, indent=4)
+    with open('/data/lots.json', 'w', encoding='utf8') as f:
+        json.dump(lots, f, ensure_ascii=False, indent=4)
+    
+    # Отправляем информацию о покупке
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton('📲 Запросить код', callback_data=f'get_code_{number}'),
+        types.InlineKeyboardButton('🔓 Подтвердить получение', callback_data=f'confirm_{number}')
+    )
+    
+    await bot.send_message(chat_id=call.from_user.id,text=f"*✅ Лот №{number[-4:]} куплен!*\n\nНомер: *{number}*\nПароль: *{lots[number]['pass']}*\nТип выдачи: *{lots[number]['type']}*\n\n_Код авторизации будет автоматически отправлен вам в течение 5 минут._", parse_mode='Markdown',reply_markup=markup)
+    
+    # Если автоматическая выдача
+    if lots[number]['type'] == 'Автоматический':
+        try:
+            # Запускаем процесс авторизации
+            await tg_auth.start_auth(phone=number, chat_id=call.from_user.id)
             
-            with open('/data/lots.json', 'w', encoding='utf8') as z:
-                numbers[number]['status'] = "Куплен"
-                numbers[number]['buyer'] = str(call.from_user.id)
-                json.dump(numbers, z, ensure_ascii=False, indent=4)
+            # Ожидаем код в течение 5 минут
+            code = await wait_for_verification_code(
+                phone_number=number,
+                bot=bot,
+                timeout=300
+            )
             
-            mrk = types.InlineKeyboardMarkup(row_width=1)
-            but1 = types.InlineKeyboardButton(text='📲 Запросить код', callback_data=f'📲 Запросить код{number}')
-            but2 = types.InlineKeyboardButton(text='🔓 Подтвердить получение', callback_data=f'🔓 Подтвердить получение{number}')
-            mrk.row(but1, but2)
-            
-            bot.send_message(
-                chat_id=call.from_user.id,
-                text=(
-                    f'Лот *№{number[-4:]}*:\n'
-                    f'Номер: *{number}* \n'
-                    f'Пароль: *{numbers[number]['pass']}*\n'
-                    f'Отлега: *{numbers[number]["otlega"]}*\n'
-                    f'Тип выдачи: *{numbers[number]["type"]}*\n'
-                    f'Цена: *{numbers[number]["price"]}₽*\n\n'
-                    '❗️ После входа в аккаунт вам нужно *подтвердить заказ в течение 5 минут*, иначе средства будут списаны автоматически\n\n'
-                    f'_Код авторизации будет автоматически выслан вам в течение 5 минут_\nЕсли код не пришел *обратитесь в поддержку*'
-                ),
-                parse_mode='Markdown',
-                reply_markup=mrk
-            )  
+            if code:
+                await bot.send_message(chat_id=call.from_user.id,text=f"*🔐 Ваш код авторизации: {code}*",parse_mode='Markdown')
+        except Exception as e:
+            print(f"Ошибка при автоматической выдаче: {e}")
+            await bot.send_message(chat_id=call.from_user.id,text="*❌ Ошибка при автоматической выдаче кода. Обратитесь в поддержку.*",parse_mode='Markdown')
 
-            if numbers[number]["type"] == 'Ручной':
-                for id in ADMINID:
-                    bot.send_message(
-                        chat_id=id, 
-                        text=(
-                            f'*Новая покупка!*\n\n'
-                            f'Покупатель: {call.from_user.username}\n'
-                            f'Лот *№{number[-4:]}*:\n'
-                            f'Номер: *{number}* \n'
-                            f'Пароль: *{numbers[number]['pass']}*\n'
-                            f'Отлега: *{numbers[number]["otlega"]}*\n'
-                            f'Тип выдачи: *{numbers[number]["type"]}*\n'
-                            f'Цена: *{numbers[number]["price"]}₽*\n\n'
-                            '_Вы сможете отправить код после того как пользователь нажмет соответствующую кнопку_'
-                        ),
-                        parse_mode='Markdown',
-                    )
-            else:
-                try:
-                    for id in ADMINID:
-                        bot.send_message(
-                            chat_id=id, 
-                            text=(
-                                f'*Новая покупка!*\n\n'
-                                f'Покупатель: {call.from_user.username}\n'
-                                f'Лот *№{number[-4:]}*:\n'
-                                f'Номер: *{number}* \n'
-                                f'Пароль: *{numbers[number]['pass']}*\n'
-                                f'Отлега: *{numbers[number]["otlega"]}*\n'
-                                f'Тип выдачи: *{numbers[number]["type"]}*\n'
-                                f'Цена: *{numbers[number]["price"]}₽*\n\n'
-                                '_Лот будет автоматически выдан пользователю_'
-                            ),
-                            parse_mode='Markdown',
-                        )
-                    # Используем глобальный tg_auth вместо создания нового
-                    tg_auth.start_auth(phone=number, chat_id=call.from_user.id)
-                    get_last_code_sync(phone_number=number, bot=bot)
-                except Exception as e:
-                    print(f"Ошибка при автоматической выдаче: {e}")
-                    bot.send_message(
-                        chat_id=call.from_user.id,
-                        text="❌ Произошла ошибка при автоматической выдаче. Обратитесь в поддержку."
-                    )               
-        else:
-            bot.send_message(chat_id=call.from_user.id, text='*Извините, лот уже купили\nПрисмотритесь к другим лотам*', parse_mode='Markdown')
-    else:
-        bot.send_message(chat_id=call.from_user.id, text='*У вас недостаточно средств!\nПополните баланс и возвращайтесь к лоту*', parse_mode='Markdown')
+@bot.callback_query_handler(func=lambda call: call.data.startswith('get_code_'))
+async def get_code_handler(call: types.CallbackQuery):
+    number = call.data.replace('get_code_', '')
+    try:
+        code = await wait_for_verification_code(
+            phone_number=number,
+            bot=bot,
+            timeout=300
+        )
+        if code:
+            await bot.send_message(chat_id=call.from_user.id,text=f"*🔐 Ваш код авторизации: {code}*",parse_mode='Markdown')
+    except Exception as e:
+        print(f"Ошибка при получении кода: {e}")
+        await bot.send_message(chat_id=call.from_user.id ,text="*❌ Ошибка при получении кода. Обратитесь в поддержку.*", parse_mode='Markdown')
 
 def sendotzyv(m):
     bot.forward_message(chat_id=CHANNEL_ID, from_chat_id=m.chat.id, message_id=m.message_id)
