@@ -44,7 +44,7 @@ sort_states = {}
 user_states = {}
 
 crypto = pyCryptoPayAPI(api_token=CRYPTOPAYTOKEN, test_net=False)
-bot = telebot.TeleBot(token=TESTBOTTOKEN)
+bot = telebot.TeleBot(token=TOKEN)
 
 # Введите свои данные
 API_ID = 24476076  # Замените на ваш API ID
@@ -609,14 +609,14 @@ def codesend(m):
 
 @bot.message_handler(['start'])
 def start(m: types.Message):
-    # chat_member = bot.get_chat_member(chat_id='@stillnegan', user_id=m.from_user.id)
-    # if chat_member.status in ['member', 'administrator', 'creator']:
-    #     pass
-    # else:
-    #     mrkx = types.InlineKeyboardMarkup(row_width=2)
-    #     mrkx.add(types.InlineKeyboardButton(text='Подписатся ➕', url='https://t.me/stillnegan'))
-    #     bot.send_message(chat_id=m.from_user.id, text=f'*Для работы с ботом подпишитесь на наш канал*\n_туда будут выкладыватся все обновления бота и важная инфорация полезная для вас_\n', parse_mode='Markdown', reply_markup=mrkx)
-    #     return None
+    chat_member = bot.get_chat_member(chat_id='@stillnegan', user_id=m.from_user.id)
+    if chat_member.status in ['member', 'administrator', 'creator']:
+        pass
+    else:
+        mrkx = types.InlineKeyboardMarkup(row_width=2)
+        mrkx.add(types.InlineKeyboardButton(text='Подписатся ➕', url='https://t.me/stillnegan'))
+        bot.send_message(chat_id=m.from_user.id, text=f'*Для работы с ботом подпишитесь на наш канал*\n_туда будут выкладыватся все обновления бота и важная инфорация полезная для вас_\n', parse_mode='Markdown', reply_markup=mrkx)
+        return None
     mrk = types.InlineKeyboardMarkup(row_width=1)
     but1 = types.InlineKeyboardButton(text='👤 Профиль', callback_data='👤 Профиль')
     but2 = types.InlineKeyboardButton(text='📦 Каталог товаров', callback_data='📦 Каталог товаров')
@@ -1564,6 +1564,7 @@ def get(m: types.Message):
                     with open(file, 'r', encoding='utf8')as f:
                         bot.send_document(chat_id=m.from_user.id, document=f, caption=f'{file}')
             
+
 
 
 bot.infinity_polling(logger_level=logging.INFO)
