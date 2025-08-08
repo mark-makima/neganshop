@@ -184,12 +184,9 @@ class JsonDataCleaner:
 class TelegramAuth:
     def __init__(self):
         self.clients = {}
-        self.loop = asyncio.new_event_loop()  # Создаем новый event loop
+        self.loop = asyncio.get_event_loop()
+        # Гарантируем существование директории для сессий
         os.makedirs("/data/sessions", exist_ok=True)
-
-    def clean_phone_number(self, phone):
-        """Очищает номер телефона от всех нецифровых символов"""
-        return re.sub(r'[^0-9]', '', phone)
 
     async def _create_client(self, phone):
         """Создает клиента Telethon для номера"""
@@ -211,17 +208,15 @@ class TelegramAuth:
     async def _send_code(self, phone, chat_id):
         """Отправка кода подтверждения"""
         try:
-            # Очищаем номер телефона перед использованием
-            clean_phone = self.clean_phone_number(phone)
-            client = await self._create_client(clean_phone)
+            client = await self._create_client(phone)
             await client.connect()
             
             # Добавляем задержку перед запросом кода
             await asyncio.sleep(2)
             
-            code_request = await client.send_code_request(clean_phone)
+            code_request = await client.send_code_request(phone)
             user_states[chat_id] = {
-                'phone': clean_phone,  # Сохраняем очищенный номер
+                'phone': phone,
                 'code_hash': code_request.phone_code_hash,
                 'waiting_code': True,
                 'waiting_password': False
@@ -230,21 +225,10 @@ class TelegramAuth:
         except Exception as e:
             bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             if 'client' in locals():
-                await asyncio.sleep(2)
                 await client.disconnect()
-    
-    def start_auth(self, phone, chat_id):
-        """Синхронная обертка для асинхронного метода _send_code"""
-        try:
-            asyncio.set_event_loop(self.loop)
-            self.loop.run_until_complete(self._send_code(phone, chat_id))
-        except Exception as e:
-            print(f"Ошибка в start_auth: {e}")
-            # Можно добавить обработку ошибки, например, отправить сообщение пользователю
-            bot.send_message(chat_id, f"❌ Ошибка при отправке кода: {str(e)}")
 
     async def _confirm_code(self, chat_id, code):
-        """Асинхронный метод подтверждения кода"""
+        """Подтверждение кода и сохранение сессии"""
         if chat_id not in user_states:
             return False
 
@@ -271,18 +255,38 @@ class TelegramAuth:
             print(f"Ошибка авторизации: {e}")
             return False
 
-    def confirm_code(self, chat_id, code):
-        """Синхронная обёртка для _confirm_code"""
-        asyncio.set_event_loop(self.loop)
+    async def _save_session_and_cleanup(self, client, phone, chat_id):
+        """Сохраняет сессию и выполняет очистку"""
         try:
-            return self.loop.run_until_complete(self._confirm_code(chat_id, code))
+            session_file = f"/data/sessions/{phone}.session"
+            
+            # Получаем строку сессии
+            session_string = client.session.save()
+            
+            # Сохраняем в файл
+            with open(session_file, 'w') as f:
+                f.write(session_string)
+                
+            return True
         except Exception as e:
-            print(f"Ошибка в confirm_code: {e}")
+            print(f"Ошибка сохранения сессии: {e}")
             return False
-        
+        finally:
+            await client.disconnect()
+            self.clients.pop(phone, None)
+            user_states.pop(chat_id, None)
+
+    def start_auth(self, phone, chat_id):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._send_code(phone, chat_id))
+
+    def confirm_code(self, chat_id, code):
+        asyncio.set_event_loop(self.loop)
+        return self.loop.run_until_complete(self._confirm_code(chat_id, code))
+
     def confirm_password(self, chat_id, password):
         asyncio.set_event_loop(self.loop)
-        return self.loop.run_until_complete(self.confirm_password(chat_id, password))
+        return self.loop.run_until_complete(self._confirm_password(chat_id, password))
 
     async def _save_session_and_cleanup(self, client, phone, chat_id):
         """Сохраняет сессию и выполняет очистку"""
@@ -1553,6 +1557,4 @@ def get(m: types.Message):
             
 
 
-
 bot.infinity_polling(logger_level=logging.INFO)
-
