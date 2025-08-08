@@ -167,7 +167,7 @@ class TelegramAuth:
             await self.bot.send_message(chat_id, "🔑 Код подтверждения отправлен. Введите код из SMS:")
             return True
         except Exception as e:
-            await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
+            self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             if phone in self.clients:
                 await self.clients[phone].disconnect()
                 del self.clients[phone]
@@ -176,19 +176,19 @@ class TelegramAuth:
     async def confirm_code(self, chat_id, code):
         """Подтверждает код авторизации"""
         if chat_id not in self.user_states:
-            await self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
+            self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
             return False
 
         data = self.user_states[chat_id]
         client = data.get('client')
         if not client:
-            await self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
+            self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
             return False
 
         try:
             clean_code = re.sub(r'\D', '', code)
             if len(clean_code) != 5:
-                await self.bot.send_message(chat_id, "❌ Код должен содержать 5 цифр")
+                self.bot.send_message(chat_id, "❌ Код должен содержать 5 цифр")
                 return False
 
             await client.sign_in(
@@ -204,28 +204,28 @@ class TelegramAuth:
                 
             await client.disconnect()
             del self.user_states[chat_id]
-            await self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
+            self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
             return True
             
         except SessionPasswordNeededError:
             self.user_states[chat_id]['waiting_password'] = True
             self.user_states[chat_id]['waiting_code'] = False
-            await self.bot.send_message(chat_id, "🔐 Требуется двухфакторная аутентификация. Введите пароль:")
+            self.bot.send_message(chat_id, "🔐 Требуется двухфакторная аутентификация. Введите пароль:")
             return False
         except Exception as e:
-            await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
+            self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             return False
 
     async def confirm_password(self, chat_id, password):
         """Подтверждает пароль 2FA"""
         if chat_id not in self.user_states:
-            await self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
+            self.bot.send_message(chat_id, "❌ Сессия не найдена. Начните процесс заново.")
             return False
 
         data = self.user_states[chat_id]
         client = data.get('client')
         if not client:
-            await self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
+            self.bot.send_message(chat_id, "❌ Ошибка клиента. Начните процесс заново.")
             return False
 
         try:
@@ -238,11 +238,11 @@ class TelegramAuth:
                 
             await client.disconnect()
             del self.user_states[chat_id]
-            await self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
+            self.bot.send_message(chat_id, "✅ Авторизация прошла успешно!")
             return True
             
         except Exception as e:
-            await self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
+            self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
             return False
 
 async def wait_for_verification_code(phone_number, bot, timeout=300):
@@ -290,13 +290,13 @@ async def wait_for_verification_code(phone_number, bot, timeout=300):
                     
         try:
             await asyncio.wait_for(code_received.wait(), timeout=timeout)
-            await bot.send_message(
+            bot.send_message(
                 chat_id=chat_id,
                 text=f"🔑 Получен код: {verification_code[0]}"
             )
             return verification_code[0]
         except asyncio.TimeoutError:
-            await bot.send_message(
+            bot.send_message(
                 chat_id=chat_id, 
                 text='⌛ Время ожидания истекло, код не получен.'
             )
