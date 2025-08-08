@@ -164,7 +164,7 @@ class TelegramAuth:
                 'waiting_code': True,
                 'waiting_password': False
             }
-            await self.bot.send_message(chat_id, "🔑 Код подтверждения отправлен. Введите код из SMS:")
+            self.bot.send_message(chat_id, "🔑 Код подтверждения отправлен. Введите код из SMS:")
             return True
         except Exception as e:
             self.bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
@@ -1257,7 +1257,7 @@ def pricenextstep(m):
 def run_auth():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot.tg_auth.start_auth(num, call.from_user.id))
+    loop.run_until_complete(tg_auth.start_auth(num, call.from_user.id))
     loop.close()
 
 Thread(target=run_auth, daemon=True).start()
@@ -1450,3 +1450,4 @@ def get(m: types.Message):
 
 
 bot.infinity_polling(logger_level=logging.INFO)
+
